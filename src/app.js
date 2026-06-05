@@ -62,6 +62,7 @@ export function createApp() {
     app.use('/ack', requireSecret);
     app.use('/api/push/subscribe', requireSecret);
     app.use('/api/push/unsubscribe', requireSecret);
+    app.use('/api/push/diag', requireSecret);
     app.use('/proactive/*', requireSecret);
 
     app.post('/generate', async (c) => {
@@ -177,6 +178,38 @@ export function createApp() {
         const entry = subscription.channel ? subscription : { channel: channel || 'web', sub: subscription };
         await sub.add(inboxId, entry);
         return c.json({ ok: true });
+    });
+
+    // 🩺 推送链路自检（设置页「检查推送」按钮调）：
+    //   - 列出本 inbox 当前注册了哪些推送订阅通道（web/apns/fcm），不回 token 全文（脱敏）。
+    //   - test:true 时对每条订阅真发一条测试推送，回每条的投递结果（含中转/APNs 的 reason）。
+    //   一眼能看出：没有 apns 订阅 = 客户端没注册成功；有订阅但 dispatch 失败 = 中转/凭据问题。
+    app.post('/api/push/diag', async (c) => {
+        let body;
+        try { body = await c.req.json(); } catch { body = {}; }
+        const { inboxId, test } = body || {};
+        if (!inboxId) return c.json({ error: 'inboxId required' }, 400);
+        const { sub } = await getStores(c.env);
+        const subs = await sub.list(inboxId);
+        const mask = (s) => {
+            const t = s?.token || s?.sub?.token || s?.sub?.endpoint || '';
+            const tail = String(t).slice(-6);
+            return { channel: s?.channel || 'web', idTail: tail ? `…${tail}` : null };
+        };
+        const channels = subs.map(mask);
+        const result = { inboxId, count: subs.length, channels };
+        if (test && subs.length) {
+            const payload = { title: '糯叽机', body: '推送链路自检', kind: 'relay-diag' };
+            result.dispatch = [];
+            for (const s of subs) {
+                let res;
+                try { res = await dispatchPush(c.env, s, payload); }
+                catch (e) { res = { ok: false, reason: e?.message || String(e) }; }
+                result.dispatch.push({ channel: s?.channel || 'web', ok: !!res?.ok, gone: !!res?.gone, reason: res?.reason || null });
+                if (res?.gone) await sub.remove(inboxId, s);
+            }
+        }
+        return c.json(result);
     });
 
     app.delete('/api/push/unsubscribe', async (c) => {
