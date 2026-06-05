@@ -74,13 +74,31 @@ export class MemoryProactiveStore {
 
 // ===== Cloudflare KV 实现 =====
 // key 前缀 `p:`；listEnabled 扫全前缀（pair 数量有限，可接受）
+// ⚠️ 不用 kv.list(最终一致,刚注册的对 cron 可能扫不到)，改维护全局索引 key `pidx`(强一致 get)。
 class KvProactiveStore {
     constructor(kv) { this.kv = kv; this.kind = 'kv'; }
+    async _getIdx() {
+        const raw = await this.kv.get('pidx');
+        if (!raw) return [];
+        try { return JSON.parse(raw); } catch { return []; }
+    }
+    async _putIdx(keys) { await this.kv.put('pidx', JSON.stringify(keys)); }
+    async _addToIdx(pairKey) {
+        const idx = await this._getIdx();
+        if (!idx.includes(pairKey)) { idx.push(pairKey); await this._putIdx(idx); }
+    }
+    async _removeFromIdx(pairKey) {
+        const idx = await this._getIdx();
+        const next = idx.filter((k) => k !== pairKey);
+        if (next.length !== idx.length) await this._putIdx(next);
+    }
     async upsert(rec) {
-        const key = `p:${makePairKey(rec.inboxId, rec.userId, rec.charId)}`;
+        const pairKey = makePairKey(rec.inboxId, rec.userId, rec.charId);
+        const key = `p:${pairKey}`;
         const prevRaw = await this.kv.get(key);
         const prev = prevRaw ? JSON.parse(prevRaw) : {};
         await this.kv.put(key, JSON.stringify({ ...prev, ...rec, updatedAt: rec.updatedAt || Date.now() }));
+        await this._addToIdx(pairKey);
     }
     async patch(inboxId, userId, charId, patch) {
         const key = `p:${makePairKey(inboxId, userId, charId)}`;
@@ -90,18 +108,18 @@ class KvProactiveStore {
         await this.kv.put(key, JSON.stringify({ ...prev, ...patch, updatedAt: Date.now() }));
         return true;
     }
-    async remove(inboxId, userId, charId) { await this.kv.delete(`p:${makePairKey(inboxId, userId, charId)}`); }
+    async remove(inboxId, userId, charId) {
+        const pairKey = makePairKey(inboxId, userId, charId);
+        await this.kv.delete(`p:${pairKey}`);
+        await this._removeFromIdx(pairKey);
+    }
     async _all() {
+        const idx = await this._getIdx();
         const out = [];
-        let cursor;
-        do {
-            const res = await this.kv.list({ prefix: 'p:', cursor });
-            for (const k of res.keys) {
-                const raw = await this.kv.get(k.name);
-                if (raw) out.push(JSON.parse(raw));
-            }
-            cursor = res.list_complete ? null : res.cursor;
-        } while (cursor);
+        for (const pairKey of idx) {
+            const raw = await this.kv.get(`p:${pairKey}`);
+            if (raw) { try { out.push(JSON.parse(raw)); } catch { /* skip */ } }
+        }
         return out;
     }
     async listEnabled() { return (await this._all()).filter(r => r.enabled); }
