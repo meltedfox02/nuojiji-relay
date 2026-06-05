@@ -146,6 +146,9 @@ export function createApp() {
             };
         }
         await outbox.put(inboxId, item);
+        // 🔧 诊断：写入后立即自查一次，确认 put 真的进了同一 inbox（排查 inboxId 不匹配/KV 写入失败）
+        let _selfCheck = -1;
+        try { _selfCheck = (await outbox.list(inboxId, 0)).length; } catch { /* ignore */ }
 
         // 发叫醒推送（best-effort，丢了靠手机轮询补）。推送可放 waitUntil（轻量，丢了也无妨）。
         const pushWork = (async () => {
@@ -170,7 +173,8 @@ export function createApp() {
         } catch { pushWork.catch(() => {}); }
 
         // outbox 已写入，返回（手机轮询会拉到）。202 语义保留。
-        return c.json({ accepted: true, requestId, generated: !item.error }, 202);
+        // _selfCheck = 写入后自查同 inbox 的条数；inboxId 回显用于对比手机查询的 inboxId。
+        return c.json({ accepted: true, requestId, generated: !item.error, inboxId, selfCheck: _selfCheck, itemId: id, err: item.error || null }, 202);
     });
 
     app.get('/outbox', async (c) => {
