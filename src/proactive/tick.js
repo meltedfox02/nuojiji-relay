@@ -7,7 +7,7 @@ import { createSubStore } from '../store/subStore.js';
 import { shouldFire, shouldFireInterval } from './impulseEngine.js';
 import { runGeneration } from '../ai/aiCaller.js';
 import { dispatchPush } from '../push/pushSender.js';
-import { nowMs } from '../util/ids.js';
+import { nowMs, extractPushBodies } from '../util/ids.js';
 import { renderTimeTokens } from '../util/timeTokens.js';
 import { buildMemoryContext } from './mcpContext.js';
 
@@ -123,13 +123,28 @@ export async function runProactiveTick(env) {
                 lifeState: { ...ls, lastImpulseAt: now, lastProactiveSentAt: now },
             });
 
-            // 发推送叫醒
+            // 发推送叫醒——像微信那样【逐条气泡分开弹 + 带消息内容 + 角色名标题】，
+            // 与 /generate 路径一致（extractPushBodies 把 AI 的 JSON-Lines 拆成每个气泡一条文本）。
             try {
                 const subs = await sub.list(rec.inboxId);
-                const payload = { title: '糯叽机', body: '有新消息', charId: rec.charId, userId: rec.userId, kind: 'relay-outbox' };
-                for (const s of subs) {
-                    const res = await dispatchPush(env, s, payload);
-                    if (res?.gone) await sub.remove(rec.inboxId, s);
+                if (subs.length) {
+                    const title = rec.timeSpec?.charName || '糯叽机';
+                    const bodies = error ? ['有新消息，点开查看'] : extractPushBodies(content);
+                    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+                    let i = 0;
+                    for (const body of bodies) {
+                        // 逐条之间加真人节奏延迟（按字数估打字时长），第一条立即发。封顶防 Worker 超时。
+                        if (i > 0) {
+                            const delay = Math.min(4000, 600 + (body?.length || 0) * 120);
+                            await sleep(delay);
+                        }
+                        const payload = { title, body, charId: rec.charId, userId: rec.userId, kind: 'relay-outbox' };
+                        for (const s of subs) {
+                            const res = await dispatchPush(env, s, payload);
+                            if (res?.gone) await sub.remove(rec.inboxId, s);
+                        }
+                        i++;
+                    }
                 }
             } catch (e) { console.warn('[proactive] push failed:', e?.message); }
 
