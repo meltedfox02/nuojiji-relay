@@ -236,8 +236,46 @@ export function createApp() {
         };
         const channels = subs.map(mask);
         const result = { inboxId, count: subs.length, channels };
+
+        // 🔬 头像链路诊断：查这个 inbox 注册过的 pair 里有没有存 avatarUrl，
+        //    以及该 URL 指向的头像在 KV 里是否真的存在（避免「上传失败/过期」却不自知）。
+        try {
+            const { proactive } = await getStores(c.env);
+            const recs = (proactive?.listByInbox ? await proactive.listByInbox(inboxId) : []) || [];
+            const kv = c.env?.OUTBOX;
+            result.avatars = [];
+            for (const r of recs) {
+                const url = r?.avatarUrl || null;
+                let stored = null;
+                if (url && kv) {
+                    const m = String(url).match(/\/avatar\/([\w.-]+)$/);
+                    if (m) {
+                        const raw = await kv.get(`av:${m[1]}`).catch(() => null);
+                        stored = raw ? `present(${raw.length}b)` : 'MISSING-in-KV';
+                    } else stored = 'unparseable-url';
+                }
+                result.avatars.push({
+                    charId: r?.charId ?? null, charName: r?.timeSpec?.charName ?? null,
+                    avatarUrl: url, kvStatus: url ? stored : 'NO-avatarUrl-registered',
+                });
+            }
+        } catch (e) {
+            result.avatarsError = String(e?.message || e);
+        }
+
         if (test && subs.length) {
-            const payload = { title: '糯叽机', body: '推送链路自检', kind: 'relay-diag' };
+            // 🔬 带上第一个有头像的 pair 的 avatarUrl，真正测「头像推送」整条链路。
+            const firstAvatar = (result.avatars || []).find(a => a.avatarUrl);
+            const fullUrl = firstAvatar?.avatarUrl
+                ? (firstAvatar.avatarUrl.startsWith('http') ? firstAvatar.avatarUrl : `${new URL(c.req.url).origin}${firstAvatar.avatarUrl}`)
+                : null;
+            const payload = {
+                title: firstAvatar?.charName || '糯叽机', body: '推送链路自检（带头像）', kind: 'relay-diag',
+                avatarUrl: fullUrl, senderName: firstAvatar?.charName || '糯叽机',
+                conversationId: firstAvatar ? `${inboxId}_${firstAvatar.charId}` : null,
+                mutableContent: true,
+            };
+            result.testPayloadAvatarUrl = fullUrl;
             result.dispatch = [];
             for (const s of subs) {
                 let res;
