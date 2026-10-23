@@ -16,6 +16,8 @@ export function isAnthropicOfficialUrl(apiUrl) {
 function buildApiEndpoint(apiUrl, suffix) {
     if (!apiUrl) return '';
     let base = apiUrl.replace(/\/+$/, '');
+    if (base.endsWith(suffix)) return base;
+    if (suffix === '/chat/completions' && base.endsWith('/openai')) return `${base}${suffix}`;
     if (isAnthropicOfficialUrl(base)) {
         if (!/\/v\d+$/.test(base) && !base.includes('/v1')) {
             base = `${base}/v1`;
