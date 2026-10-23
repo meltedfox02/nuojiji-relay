@@ -142,6 +142,10 @@ docker run -d -p 8787:8787 \
 - 打开「启用云端中继」开关
 - 点「测试连接」，绿了就成
 
+### 使用原生 Gemini API
+
+在糯叽机的 AI API 设置中选择 **Gemini**，填写 Gemini API key 和模型名。API 地址可以填服务根地址或版本根地址，例如 `https://generativelanguage.googleapis.com/v1beta`；中继会调用原生 `streamGenerateContent?alt=sse`，并用 `x-goog-api-key` 发送 key。自建或代理地址也可以使用同样的格式。原生路径支持文本和 base64 data URL 图片；远程图片 URL 和工具调用历史会明确报错，避免静默丢弃；原生 Gemini 的主动消息 MCP 工具调用暂不在支持范围内。若服务只提供 OpenAI 兼容接口，可继续填 `/v1beta/openai` 或完整的 `/v1/chat/completions` 地址；通用 `/v1` 仍按已有 OpenAI 兼容配置处理。原生 Gemini v1 接口可填写完整的 `.../v1/models/{model}:generateContent` 地址。
+
 ---
 
 ## 环境变量一览
