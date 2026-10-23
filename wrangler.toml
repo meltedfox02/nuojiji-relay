@@ -1,0 +1,21 @@
+name = "nuojiji-relay"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Outbox + 推送订阅存这个 KV namespace。
+# ⭐ 不写 id：用「Deploy to Cloudflare」一键部署 / wrangler deploy 时会【自动创建】并绑定，
+#    用户零操作（CF 2025 自动资源 provisioning）。
+[[kv_namespaces]]
+binding = "OUTBOX"
+
+# secret 不写这里。一键部署页会根据 .dev.vars.example 提示填；
+# 或部署后在 CF 面板 → Worker → 变量和秘密 添加：
+#   RELAY_SECRET（必填，和 App 里「中继密钥」一致）
+#   VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT（可选，开 Web Push）
+
+# Phase 2：定时主动生成（角色 App 关闭也能主动找你）。
+# 每分钟 tick：遍历已注册的 pair 重算 impulse，命中就实时调 AI 生成 → outbox + 推送。
+# 不需要主动消息可注释掉这两行。
+[triggers]
+crons = ["* * * * *"]

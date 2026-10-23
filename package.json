@@ -1,0 +1,27 @@
+{
+  "name": "nuojiji-relay",
+  "version": "1.0.0",
+  "description": "糯叽机 云端中继 (BYOB) — 把 AI 生成搬到服务端，手机切后台也不中断。自带后端，用户 fork 部署自己的实例。",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "dev:worker": "wrangler dev",
+    "deploy:worker": "wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "@hono/node-server": "^1.13.0",
+    "node-cron": "^3.0.3"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.3.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
